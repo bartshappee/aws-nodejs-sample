@@ -1,36 +1,58 @@
-/*
- * Copyright 2013. Amazon Web Services, Inc. All Rights Reserved.
- * 
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * 
- *     http://www.apache.org/licenses/LICENSE-2.0
- * 
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
-**/
+var express = require('express');
+var mysql = require('mysql');
+var dbconfig = require('opsworks'); //[1] Include database connection data
+var app = express();
+var outputString = "";
 
-// Load the SDK and UUID
-var AWS = require('aws-sdk');
-var uuid = require('node-uuid');
+app.engine('html', require('ejs').renderFile);
 
-// Create an S3 client
-var s3 = new AWS.S3();
+//[2] Get database connection data
+app.locals.hostname = dbconfig.db['host'];
+app.locals.username = dbconfig.db['username'];
+app.locals.password = dbconfig.db['password'];
+app.locals.port = dbconfig.db['port'];
+app.locals.database = dbconfig.db['database'];
+app.locals.connectionerror = 'successful';
+app.locals.databases = '';
 
-// Create a bucket and upload something into it
-var bucketName = 'node-sdk-sample-' + uuid.v4();
-var keyName = 'hello_world.txt';
-
-s3.createBucket({Bucket: bucketName}, function() {
-  var params = {Bucket: bucketName, Key: keyName, Body: 'Hello World!'};
-  s3.putObject(params, function(err, data) {
-    if (err)
-      console.log(err)
-    else
-      console.log("Successfully uploaded data to " + bucketName + "/" + keyName);
-  });
+//[3] Connect to the Amazon RDS instance
+var connection = mysql.createConnection({
+    host: dbconfig.db['host'],
+    user: dbconfig.db['username'],
+    password: dbconfig.db['password'],
+    port: dbconfig.db['port'],
+    database: dbconfig.db['database']
 });
+
+connection.connect(function(err)
+{
+    if (err) {
+        app.locals.connectionerror = err.stack;
+        return;
+    }
+});
+
+// [4] Query the database
+connection.query('SHOW DATABASES', function (err, results) {
+    if (err) {
+        app.locals.databases = err.stack;
+    }
+    
+    if (results) {
+        for (var i in results) {
+            outputString = outputString + results[i].Database + ', ';
+        }
+        app.locals.databases = outputString.slice(0, outputString.length-2);
+    }
+});
+
+connection.end();
+
+app.get('/', function(req, res) {
+    res.render('./index.html');
+});
+
+app.use(express.static('public'));
+
+//[5] Listen for incoming requests
+app.listen(process.env.PORT);
